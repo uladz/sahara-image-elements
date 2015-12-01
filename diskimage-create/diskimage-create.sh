@@ -9,6 +9,9 @@ unset DIB_IMAGE_SIZE
 # DEBUG_MODE is set by the -d flag, debug is enabled if the value is "true"
 DEBUG_MODE="false"
 
+# The default version for Cloudera plugin
+DIB_DEFAULT_CDH_VERSION="5.3"
+
 # The default version for a MapR plugin
 DIB_DEFAULT_MAPR_VERSION="5.0.0"
 
@@ -24,7 +27,7 @@ TRACING=
 usage() {
     echo
     echo "Usage: $(basename $0)"
-    echo "         [-p vanilla|spark|hdp|cloudera|storm|mapr|plain]"
+    echo "         [-p vanilla|spark|hdp|cloudera|cloudera-s3a|storm|mapr|plain]"
     echo "         [-i ubuntu|fedora|centos|centos7]"
     echo "         [-v 2|2.6|2.7.1|4|5.0|5.3|5.4]"
     echo "         [-r 3.1.1|4.0.1|4.0.2|5.0.0]"
@@ -167,6 +170,23 @@ case "$PLUGIN" in
             ;;
         esac
         ;;
+    "cloudera-s3a")
+        case "$BASE_IMAGE_OS" in
+            "" | "ubuntu" | "centos");;
+            *)
+                echo -e "'$BASE_IMAGE_OS' image type is not supported by '$PLUGIN'.\nAborting"
+                exit 1
+            ;;
+        esac
+
+        case "$HADOOP_VERSION" in
+            "" | "5.4");;
+            *)
+                echo -e "Unknown or unsupported hadoop version selected.\nAborting"
+                exit 1
+            ;;
+        esac
+        ;;
     "spark")
         case "$BASE_IMAGE_OS" in
             "" | "ubuntu");;
@@ -179,8 +199,8 @@ case "$PLUGIN" in
         case "$HADOOP_VERSION" in
             "")
                 echo "CDH version not specified"
-                echo "CDH version 5.3 will be used"
-                HADOOP_VERSION="5.3"
+                echo "CDH version $DIB_DEFAULT_CDH_VERSION will be used"
+                HADOOP_VERSION=$DIB_DEFAULT_CDH_VERSION
             ;;
             "4")
                 HADOOP_VERSION="CDH4"
@@ -526,7 +546,7 @@ fi
 if [ -z "$PLUGIN" -o "$PLUGIN" = "spark" ]; then
     export DIB_HDFS_LIB_DIR="/usr/lib/hadoop"
     export DIB_CLOUD_INIT_DATASOURCES=$CLOUD_INIT_DATASOURCES
-    export DIB_SPARK_VERSION
+    export DIB_SPARK_VERSION=${DIB_SPARK_VERSION:-$DIB_DEFAULT_SPARK_VERSION}
 
     COMMON_ELEMENTS="$JAVA_ELEMENT swift_hadoop spark"
     if [ "$DIB_SPARK_VERSION" == "1.0.2" ]; then
@@ -534,7 +554,7 @@ if [ -z "$PLUGIN" -o "$PLUGIN" = "spark" ]; then
         export DIB_CDH_VERSION="CDH4"
         ubuntu_elements_sequence="$COMMON_ELEMENTS hadoop-cdh"
     else
-        export DIB_CDH_VERSION=$HADOOP_VERSION
+        export DIB_CDH_VERSION=${HADOOP_VERSION:-$DIB_DEFAULT_CDH_VERSION}
         ubuntu_elements_sequence="$COMMON_ELEMENTS hadoop-cloudera"
     fi
 
@@ -701,6 +721,40 @@ if [ -z "$PLUGIN" -o "$PLUGIN" = "cloudera" ]; then
 
             image_create centos $cloudera_5_4_centos_image_name $cloudera_elements_sequence
 
+            unset DIB_CDH_VERSION
+        fi
+    fi
+    unset DIB_MIN_TMPFS
+fi
+
+#############################
+# Images for CDH+S3A plugin #
+#############################
+
+if [ -z "$PLUGIN" -o "$PLUGIN" = "cloudera-s3a" ]; then
+    # Cloudera installation requires additional space
+    export DIB_MIN_TMPFS=5
+
+    if [ -z "$BASE_IMAGE_OS" -o "$BASE_IMAGE_OS" = "ubuntu" ]; then
+        if [ -z "$HADOOP_VERSION" -o "$HADOOP_VERSION" = "5.4" ]; then
+            cloudera_5_4_ubuntu_image_name=${cloudera_5_4_ubuntu_image_name:-ubuntu_sahara_cloudera_s3a_5_4_0}
+            cloudera_elements_sequence="hadoop-cloudera-s3a"
+
+            # Cloudera supports only 12.04 Ubuntu
+            export DIB_CDH_VERSION="5.4"
+            export DIB_RELEASE="precise"
+            image_create ubuntu $cloudera_5_4_ubuntu_image_name $cloudera_elements_sequence
+            unset DIB_CDH_VERSION DIB_RELEASE
+        fi
+    fi
+
+    if [ -z "$BASE_IMAGE_OS" -o "$BASE_IMAGE_OS" = "centos" ]; then
+        if [ -z "$HADOOP_VERSION" -o "$HADOOP_VERSION" = "5.4" ]; then
+            cloudera_5_4_centos_image_name=${cloudera_5_4_centos_image_name:-centos_sahara_cloudera_s3a_5_4_0}
+            cloudera_elements_sequence="hadoop-cloudera-s3a selinux-permissive disable-firewall"
+
+            export DIB_CDH_VERSION="5.4"
+            image_create centos $cloudera_5_4_centos_image_name $cloudera_elements_sequence
             unset DIB_CDH_VERSION
         fi
     fi
